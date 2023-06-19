@@ -92,6 +92,7 @@ func realMain() error {
 }
 
 func serve(c *cli.Context) error {
+	os.Stdout.Write([]byte("hello world server\n"))
 	logfile := c.String("log")
 	configFile := c.String("config")
 	trace := c.Bool("trace")
@@ -123,7 +124,7 @@ func serve(c *cli.Context) error {
 	if configFile != "" {
 		cfg, err := config.GetConfig(configFile)
 		if err != nil {
-			return fmt.Errorf("cannot read specificed config, %w", err)
+			return fmt.Errorf("cannot read specified config, %w", err)
 		}
 		server.SpecificFileCfg = cfg
 	} else {
@@ -142,13 +143,17 @@ func serve(c *cli.Context) error {
 	}
 
 	// Start language server
-	log.Println("sqls: reading on stdin, writing on stdout")
-	<-jsonrpc2.NewConn(
+	fmt.Println("sqls: reading on stdin, writing on stdout")
+	stdio := stdrwc{}
+
+	svConn := jsonrpc2.NewConn(
 		context.Background(),
-		jsonrpc2.NewBufferedStream(stdrwc{}, jsonrpc2.VSCodeObjectCodec{}),
+		jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{}),
 		h,
 		connOpt...,
-	).DisconnectNotify()
+	)
+
+	<-svConn.DisconnectNotify()
 	log.Println("sqls: connections closed")
 
 	return nil
@@ -157,10 +162,14 @@ func serve(c *cli.Context) error {
 type stdrwc struct{}
 
 func (stdrwc) Read(p []byte) (int, error) {
+	//fmt.Println("server read")
+	//fmt.Println(p)
+	//return -1, nil
 	return os.Stdin.Read(p)
 }
 
 func (stdrwc) Write(p []byte) (int, error) {
+	//fmt.Println("server write")
 	return os.Stdout.Write(p)
 }
 
