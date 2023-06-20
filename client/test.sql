@@ -1,1 +1,1 @@
-select a 
+SELECT * fr

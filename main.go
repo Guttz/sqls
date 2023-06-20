@@ -10,12 +10,14 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/urfave/cli/v2"
 
 	"github.com/lighttiger2505/sqls/internal/config"
 	"github.com/lighttiger2505/sqls/internal/handler"
+	"github.com/lighttiger2505/sqls/internal/lsp"
 )
 
 // builtin variables. see Makefile
@@ -91,6 +93,30 @@ func realMain() error {
 	return nil
 }
 
+type noopHandler struct{}
+
+func (noopHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {}
+
+type pipeReadWriteCloser struct {
+	*io.PipeReader
+	*io.PipeWriter
+}
+
+func (c *pipeReadWriteCloser) Close() error {
+	err1 := c.PipeReader.Close()
+	err2 := c.PipeWriter.Close()
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
+func inMemoryPeerConns() (io.ReadWriteCloser, io.ReadWriteCloser) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+	return &pipeReadWriteCloser{sr, sw}, &pipeReadWriteCloser{cr, cw}
+}
+
 func serve(c *cli.Context) error {
 	os.Stdout.Write([]byte("hello world server\n"))
 	logfile := c.String("log")
@@ -144,17 +170,131 @@ func serve(c *cli.Context) error {
 
 	// Start language server
 	fmt.Println("sqls: reading on stdin, writing on stdout")
-	stdio := stdrwc{}
+	//stdio := stdrwc{}
 
-	svConn := jsonrpc2.NewConn(
+	a, b := inMemoryPeerConns()
+	defer a.Close()
+	defer b.Close()
+
+	/* 	go func() {
+		svConn := jsonrpc2.NewConn(
+			context.Background(),
+			jsonrpc2.NewBufferedStream(a, jsonrpc2.VSCodeObjectCodec{}),
+			h,
+			connOpt...,
+		)
+
+		<-svConn.DisconnectNotify()
+		log.Println("sqls: connections closed")
+	}() */
+
+	serverConn := jsonrpc2.NewConn(
 		context.Background(),
-		jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{}),
+		jsonrpc2.NewBufferedStream(a, jsonrpc2.VSCodeObjectCodec{}),
 		h,
 		connOpt...,
 	)
 
-	<-svConn.DisconnectNotify()
-	log.Println("sqls: connections closed")
+	client := jsonrpc2.NewConn(
+		context.Background(),
+		jsonrpc2.NewBufferedStream(b, jsonrpc2.VSCodeObjectCodec{}),
+		noopHandler{},
+	)
+
+	defer serverConn.Close()
+	defer client.Close()
+
+	var resp interface{}
+
+	// Send an LSP initialize request
+
+	time.Sleep(2000 * time.Millisecond)
+	fmt.Printf("call request \n")
+
+	err := client.Call(
+		context.Background(),
+		"initialize",
+		lsp.InitializeParams{
+			ProcessID: 1,
+			RootURI:   "file:///Users/gdemorais/qdev/temp/sqls/client",
+			Trace:     "verbose",
+		},
+		&resp)
+
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+	} else {
+		fmt.Println("response init: ", resp)
+	}
+
+	statement_1 := "select * fr"
+	statement_2 := "select * from u"
+	err = client.Call(
+		context.Background(),
+		"textDocument/didOpen",
+		lsp.DidOpenTextDocumentParams{
+			TextDocument: lsp.TextDocumentItem{
+				URI:        "test.sql",
+				LanguageID: "sql",
+				Version:    1,
+				Text:       statement_1,
+			},
+		},
+		&resp)
+
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+	} else {
+		fmt.Println("response didOpen: ", resp)
+	}
+
+	completionParams := lsp.CompletionParams{TextDocumentPositionParams: lsp.TextDocumentPositionParams{
+		TextDocument: lsp.TextDocumentIdentifier{
+			URI: "test.sql",
+		},
+		Position: lsp.Position{
+			Line:      0,
+			Character: len(statement_1),
+		},
+	}}
+
+	err = client.Call(context.Background(), "textDocument/completion", completionParams, &resp)
+
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+	} else {
+		fmt.Println("response completion: ", resp)
+	}
+
+	didchangeParams := lsp.DidChangeTextDocumentParams{
+		TextDocument: lsp.VersionedTextDocumentIdentifier{
+			Version: 2,
+			URI:     "test.sql",
+		},
+		ContentChanges: []lsp.TextDocumentContentChangeEvent{
+			{Text: statement_2},
+		},
+	}
+
+	err = client.Call(context.Background(), "textDocument/didChange", didchangeParams, &resp)
+
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+	} else {
+		fmt.Println("response didChange: ", resp)
+	}
+
+	time.Sleep(2000 * time.Millisecond)
+	// Update cursor position
+	completionParams.TextDocumentPositionParams.Position.Character = len(statement_2)
+
+	err = client.Call(context.Background(), "textDocument/completion", completionParams, &resp)
+
+	if err != nil {
+		fmt.Printf("Error sending request: %v\n", err)
+	} else {
+		fmt.Println("response completion: ", resp)
+	}
 
 	return nil
 }
@@ -194,4 +334,34 @@ func OpenEditor(program string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func getContentChanges(oldStr, newStr string) []lsp.TextDocumentContentChangeEvent {
+	var changes []lsp.TextDocumentContentChangeEvent
+
+	// Find the common prefix and suffix of the two strings.
+	prefix := 0
+	for prefix < len(oldStr) && prefix < len(newStr) && oldStr[prefix] == newStr[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(oldStr)-prefix && suffix < len(newStr)-prefix && oldStr[len(oldStr)-suffix-1] == newStr[len(newStr)-suffix-1] {
+		suffix++
+	}
+
+	// Calculate the range of changed text.
+	start := lsp.Position{Line: 0, Character: prefix}
+	end := lsp.Position{Line: 0, Character: len(newStr) - suffix}
+
+	// Generate a content change event based on the modified text.
+	changeEvent := lsp.TextDocumentContentChangeEvent{
+		Range: lsp.Range{
+			Start: start,
+			End:   end,
+		},
+		Text: strings.TrimPrefix(strings.TrimSuffix(newStr, string(oldStr[len(oldStr)-suffix:])), oldStr[:prefix]),
+	}
+
+	changes = append(changes, changeEvent)
+	return changes
 }
