@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/urfave/cli/v2"
@@ -24,6 +23,7 @@ import (
 var (
 	version  string
 	revision string
+	client   *jsonrpc2.Conn
 )
 
 func main() {
@@ -118,7 +118,6 @@ func inMemoryPeerConns() (io.ReadWriteCloser, io.ReadWriteCloser) {
 }
 
 func serve(c *cli.Context) error {
-	os.Stdout.Write([]byte("hello world server\n"))
 	logfile := c.String("log")
 	configFile := c.String("config")
 	trace := c.Bool("trace")
@@ -169,24 +168,9 @@ func serve(c *cli.Context) error {
 	}
 
 	// Start language server
-	fmt.Println("sqls: reading on stdin, writing on stdout")
-	//stdio := stdrwc{}
-
 	a, b := inMemoryPeerConns()
 	defer a.Close()
 	defer b.Close()
-
-	/* 	go func() {
-		svConn := jsonrpc2.NewConn(
-			context.Background(),
-			jsonrpc2.NewBufferedStream(a, jsonrpc2.VSCodeObjectCodec{}),
-			h,
-			connOpt...,
-		)
-
-		<-svConn.DisconnectNotify()
-		log.Println("sqls: connections closed")
-	}() */
 
 	serverConn := jsonrpc2.NewConn(
 		context.Background(),
@@ -195,7 +179,7 @@ func serve(c *cli.Context) error {
 		connOpt...,
 	)
 
-	client := jsonrpc2.NewConn(
+	client = jsonrpc2.NewConn(
 		context.Background(),
 		jsonrpc2.NewBufferedStream(b, jsonrpc2.VSCodeObjectCodec{}),
 		noopHandler{},
@@ -205,11 +189,7 @@ func serve(c *cli.Context) error {
 	defer client.Close()
 
 	var resp interface{}
-
 	// Send an LSP initialize request
-
-	time.Sleep(2000 * time.Millisecond)
-	fmt.Printf("call request \n")
 
 	err := client.Call(
 		context.Background(),
@@ -266,29 +246,51 @@ func serve(c *cli.Context) error {
 		fmt.Println("response completion: ", resp)
 	}
 
+	didChange(statement_2)
+
+	// Update cursor position
+	completionParams.TextDocumentPositionParams.Position.Character = len(statement_2)
+
+	resp = completion(completionParams.TextDocumentPositionParams.Position)
+
+	fmt.Println("response completion: ", resp)
+
+	return nil
+}
+
+func didChange(newText string) {
+	var resp interface{}
+
 	didchangeParams := lsp.DidChangeTextDocumentParams{
 		TextDocument: lsp.VersionedTextDocumentIdentifier{
 			Version: 2,
 			URI:     "test.sql",
 		},
 		ContentChanges: []lsp.TextDocumentContentChangeEvent{
-			{Text: statement_2},
+			{Text: newText},
 		},
 	}
 
-	err = client.Call(context.Background(), "textDocument/didChange", didchangeParams, &resp)
+	err := client.Call(context.Background(), "textDocument/didChange", didchangeParams, &resp)
 
 	if err != nil {
 		fmt.Printf("Error sending request: %v\n", err)
 	} else {
 		fmt.Println("response didChange: ", resp)
 	}
+}
 
-	time.Sleep(2000 * time.Millisecond)
-	// Update cursor position
-	completionParams.TextDocumentPositionParams.Position.Character = len(statement_2)
+func completion(position lsp.Position) interface{} {
+	var resp interface{}
 
-	err = client.Call(context.Background(), "textDocument/completion", completionParams, &resp)
+	completionParams := lsp.CompletionParams{TextDocumentPositionParams: lsp.TextDocumentPositionParams{
+		TextDocument: lsp.TextDocumentIdentifier{
+			URI: "test.sql",
+		},
+		Position: position,
+	}}
+
+	err := client.Call(context.Background(), "textDocument/completion", completionParams, &resp)
 
 	if err != nil {
 		fmt.Printf("Error sending request: %v\n", err)
@@ -296,7 +298,8 @@ func serve(c *cli.Context) error {
 		fmt.Println("response completion: ", resp)
 	}
 
-	return nil
+	// add proper return type
+	return resp
 }
 
 type stdrwc struct{}
