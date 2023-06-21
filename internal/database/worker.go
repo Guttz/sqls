@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"io"
 	"log"
+	"os"
 	"sync"
 )
 
@@ -41,6 +43,8 @@ func (w *Worker) setColumnCache(col map[string][]*ColumnDesc) {
 }
 
 func (w *Worker) Start() {
+	logWriter := io.MultiWriter(os.Stderr)
+	log.SetOutput(logWriter)
 	go func() {
 		log.Println("db worker: start")
 		for {

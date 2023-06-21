@@ -77,7 +77,6 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (result interface{}, err error) {
-	fmt.Println("Handle!")
 	// Prevent any uncaught panics from taking the entire server down.
 	defer func() {
 		if perr := panicf(recover(), "%v", req.Method); perr != nil {
@@ -89,14 +88,10 @@ func (s *Server) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.
 	if err != nil {
 		log.Printf("error serving, %+v\n", err)
 	}
-	fmt.Println("return handle")
-	fmt.Println("res: ", res)
-	fmt.Println("err: ", err)
+
 	return res, err
 }
 func (s *Server) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (result interface{}, err error) {
-	fmt.Println("handle!")
-	fmt.Println("method: ", req.Method)
 	switch req.Method {
 	case "initialize":
 		return s.handleInitialize(ctx, conn, req)
@@ -141,7 +136,6 @@ func (s *Server) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.
 }
 
 func (s *Server) handleInitialize(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (result interface{}, err error) {
-	fmt.Println("handleInitialize")
 	if req.Params == nil {
 		return nil, &jsonrpc2.Error{Code: jsonrpc2.CodeInvalidParams}
 	}
@@ -178,9 +172,7 @@ func (s *Server) handleInitialize(ctx context.Context, conn *jsonrpc2.Conn, req 
 	// Initialize database database connection
 	// NOTE: If no connection is found at this point, it is possible that the connection settings are sent to workspace config, so don't make an error
 	messenger := lsp.NewLspMessenger(conn)
-	fmt.Println("msg 1")
 	if err := s.reconnectionDB(ctx); err != nil {
-		fmt.Println("msg 2")
 		if !errors.Is(ErrNoConnection, err) {
 			if err := messenger.ShowInfo(ctx, err.Error()); err != nil {
 				log.Println("send info", err.Error())
@@ -193,7 +185,6 @@ func (s *Server) handleInitialize(ctx context.Context, conn *jsonrpc2.Conn, req 
 			}
 		}
 	}
-	fmt.Println("handleInitialize return result")
 	return result, nil
 }
 

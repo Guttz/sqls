@@ -45,7 +45,6 @@ func inMemoryPeerConns() (io.ReadWriteCloser, io.ReadWriteCloser) {
 }
 
 func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
-
 	// Initialize log writer
 	var logWriter io.Writer
 	if logfile != "" {
@@ -54,11 +53,17 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 			log.Fatal(err)
 		}
 		defer f.Close()
+		os.Stderr = f
 		logWriter = io.MultiWriter(os.Stderr, f)
 	} else {
 		logWriter = io.MultiWriter(os.Stderr)
 	}
 	log.SetOutput(logWriter)
+	// Set connect option
+	var connOpt []jsonrpc2.ConnOpt
+	if trace {
+		connOpt = append(connOpt, jsonrpc2.LogMessages(log.New(logWriter, "", 0)))
+	}
 
 	// Initialize language server
 	server := handler.NewServer()
@@ -83,12 +88,6 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 			fmt.Printf("cannot read default config, %s", err.Error())
 		}
 		server.DefaultFileCfg = cfg
-	}
-
-	// Set connect option
-	var connOpt []jsonrpc2.ConnOpt
-	if trace {
-		connOpt = append(connOpt, jsonrpc2.LogMessages(log.New(logWriter, "", 0)))
 	}
 
 	// Start language server
@@ -127,8 +126,6 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 
 	if err != nil {
 		fmt.Printf("Error sending request: %v\n", err)
-	} else {
-		fmt.Println("response init: ", resp)
 	}
 
 	statement_1 := ""
@@ -147,76 +144,9 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 
 	if err != nil {
 		fmt.Printf("Error sending request: %v\n", err)
-	} else {
-		fmt.Println("response didOpen: ", resp)
 	}
 
 	return client
-}
-
-func didChange(newText string) {
-	var resp interface{}
-
-	didchangeParams := lsp.DidChangeTextDocumentParams{
-		TextDocument: lsp.VersionedTextDocumentIdentifier{
-			Version: 2,
-			URI:     "test.sql",
-		},
-		ContentChanges: []lsp.TextDocumentContentChangeEvent{
-			{Text: newText},
-		},
-	}
-
-	err := client.Call(context.Background(), "textDocument/didChange", didchangeParams, &resp)
-
-	if err != nil {
-		fmt.Printf("Error sending request: %v\n", err)
-	} else {
-		fmt.Println("response didChange: ", resp)
-	}
-}
-
-func completion(position lsp.Position) interface{} {
-	var resp interface{}
-
-	completionParams := lsp.CompletionParams{TextDocumentPositionParams: lsp.TextDocumentPositionParams{
-		TextDocument: lsp.TextDocumentIdentifier{
-			URI: "test.sql",
-		},
-		Position: position,
-	}}
-
-	err := client.Call(context.Background(), "textDocument/completion", completionParams, &resp)
-
-	if err != nil {
-		fmt.Printf("Error sending request: %v\n", err)
-	} else {
-		fmt.Println("response completion: ", resp)
-	}
-
-	// add proper return type
-	return resp
-}
-
-type stdrwc struct{}
-
-func (stdrwc) Read(p []byte) (int, error) {
-	//fmt.Println("server read")
-	//fmt.Println(p)
-	//return -1, nil
-	return os.Stdin.Read(p)
-}
-
-func (stdrwc) Write(p []byte) (int, error) {
-	//fmt.Println("server write")
-	return os.Stdout.Write(p)
-}
-
-func (stdrwc) Close() error {
-	if err := os.Stdin.Close(); err != nil {
-		return err
-	}
-	return os.Stdout.Close()
 }
 
 func OpenEditor(program string, args ...string) error {
@@ -233,34 +163,4 @@ func OpenEditor(program string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func getContentChanges(oldStr, newStr string) []lsp.TextDocumentContentChangeEvent {
-	var changes []lsp.TextDocumentContentChangeEvent
-
-	// Find the common prefix and suffix of the two strings.
-	prefix := 0
-	for prefix < len(oldStr) && prefix < len(newStr) && oldStr[prefix] == newStr[prefix] {
-		prefix++
-	}
-	suffix := 0
-	for suffix < len(oldStr)-prefix && suffix < len(newStr)-prefix && oldStr[len(oldStr)-suffix-1] == newStr[len(newStr)-suffix-1] {
-		suffix++
-	}
-
-	// Calculate the range of changed text.
-	start := lsp.Position{Line: 0, Character: prefix}
-	end := lsp.Position{Line: 0, Character: len(newStr) - suffix}
-
-	// Generate a content change event based on the modified text.
-	changeEvent := lsp.TextDocumentContentChangeEvent{
-		Range: lsp.Range{
-			Start: start,
-			End:   end,
-		},
-		Text: strings.TrimPrefix(strings.TrimSuffix(newStr, string(oldStr[len(oldStr)-suffix:])), oldStr[:prefix]),
-	}
-
-	changes = append(changes, changeEvent)
-	return changes
 }
