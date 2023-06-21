@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -12,91 +12,13 @@ import (
 	"strings"
 
 	"github.com/sourcegraph/jsonrpc2"
-	"github.com/urfave/cli/v2"
 
 	"github.com/lighttiger2505/sqls/internal/config"
 	"github.com/lighttiger2505/sqls/internal/handler"
 	"github.com/lighttiger2505/sqls/internal/lsp"
 )
 
-// builtin variables. see Makefile
-var (
-	version  string
-	revision string
-	client   *jsonrpc2.Conn
-)
-
-func main() {
-	if err := realMain(); err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
-func realMain() error {
-	app := &cli.App{
-		Name:    "sqls",
-		Version: fmt.Sprintf("Version:%s, Revision:%s\n", version, revision),
-		Usage:   "An implementation of the Language Server Protocol for SQL.",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "log",
-				Aliases: []string{"l"},
-				Usage:   "Also log to this file. (in addition to stderr)",
-			},
-			&cli.StringFlag{
-				Name:    "config",
-				Aliases: []string{"c"},
-				Usage:   "Specifies an alternative per-user configuration file. If a configuration file is given on the command line, the workspace option (initializationOptions) will be ignored.",
-			},
-			&cli.BoolFlag{
-				Name:    "trace",
-				Aliases: []string{"t"},
-				Usage:   "Print all requests and responses.",
-			},
-		},
-		Commands: cli.Commands{
-			{
-				Name:    "config",
-				Aliases: []string{"c"},
-				Usage:   "edit config",
-				Action: func(c *cli.Context) error {
-					editorEnv := os.Getenv("EDITOR")
-					if editorEnv == "" {
-						editorEnv = "vim"
-					}
-					return OpenEditor(editorEnv, config.YamlConfigPath)
-				},
-			},
-		},
-		Action: func(c *cli.Context) error {
-			logfile := c.String("log")
-			configFile := c.String("config")
-			trace := c.Bool("trace")
-
-			Serve(logfile, configFile, trace)
-			return nil
-		},
-	}
-	cli.VersionFlag = &cli.BoolFlag{
-		Name:    "version",
-		Aliases: []string{"v"},
-		Usage:   "Print version.",
-	}
-	cli.HelpFlag = &cli.BoolFlag{
-		Name:    "help",
-		Aliases: []string{"h"},
-		Usage:   "Print help.",
-	}
-
-	err := app.Run(os.Args)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
+var client *jsonrpc2.Conn
 
 type noopHandler struct{}
 
@@ -171,10 +93,10 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 
 	// Start language server
 	a, b := inMemoryPeerConns()
-	defer a.Close()
-	defer b.Close()
+	//defer a.Close()
+	//defer b.Close()
 
-	serverConn := jsonrpc2.NewConn(
+	jsonrpc2.NewConn(
 		context.Background(),
 		jsonrpc2.NewBufferedStream(a, jsonrpc2.VSCodeObjectCodec{}),
 		h,
@@ -187,8 +109,8 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 		noopHandler{},
 	)
 
-	defer serverConn.Close()
-	defer client.Close()
+	//defer serverConn.Close()
+	//defer client.Close()
 
 	var resp interface{}
 	// Send an LSP initialize request
@@ -209,8 +131,7 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 		fmt.Println("response init: ", resp)
 	}
 
-	statement_1 := "select * fr"
-	statement_2 := "select * from u"
+	statement_1 := ""
 	err = client.Call(
 		context.Background(),
 		"textDocument/didOpen",
@@ -229,37 +150,6 @@ func Serve(logfile, configFile string, trace bool) *jsonrpc2.Conn {
 	} else {
 		fmt.Println("response didOpen: ", resp)
 	}
-
-	completionParams := lsp.CompletionParams{TextDocumentPositionParams: lsp.TextDocumentPositionParams{
-		TextDocument: lsp.TextDocumentIdentifier{
-			URI: "test.sql",
-		},
-		Position: lsp.Position{
-			Line:      0,
-			Character: len(statement_1),
-		},
-	}}
-
-	var comp []lsp.CompletionItem
-	comp = completion(completionParams.TextDocumentPositionParams.Position)
-	fmt.Println("response completion: ", comp)
-
-	didChange(statement_2)
-	// Update cursor position
-	completionParams.TextDocumentPositionParams.Position.Character = len(statement_2)
-
-	comp = completion(completionParams.TextDocumentPositionParams.Position)
-
-	fmt.Println("response completion: ", comp)
-
-	statement_3 := "select n from users;"
-	didChange(statement_3)
-	// Update cursor position
-	completionParams.TextDocumentPositionParams.Position.Character = 8
-
-	comp = completion(completionParams.TextDocumentPositionParams.Position)
-
-	fmt.Println("response completion: ", comp)
 
 	return client
 }
@@ -286,8 +176,8 @@ func didChange(newText string) {
 	}
 }
 
-func completion(position lsp.Position) []lsp.CompletionItem {
-	var resp []lsp.CompletionItem
+func completion(position lsp.Position) interface{} {
+	var resp interface{}
 
 	completionParams := lsp.CompletionParams{TextDocumentPositionParams: lsp.TextDocumentPositionParams{
 		TextDocument: lsp.TextDocumentIdentifier{
